@@ -11,15 +11,15 @@ logging.basicConfig(
 logger = logging.getLogger("MultiAccountSystem")
 
 # --- CREDENTIALS ---
-API_ID = int(os.getenv("TG_API_ID", "30861364"))
-API_HASH = os.getenv("TG_API_HASH", "2597cb5e23d6eaa3712fd58d814927d7")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8898776916:AAF-qPIGFX30gSZcmuI9M6NOdT0OYHQiRYY")
+API_ID = int(os.getenv("TG_API_ID", "36160521"))
+API_HASH = os.getenv("TG_API_HASH", "7b0cadfee2786eb6c6eba3829e483223")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8760914841:AAFZCNplhZQr_BAyosbx1xkeSzHIMBselT0")
 
 # --- DATABASE ---
-MONGO_URI =  "mongodb+srv://gopaljichoubey:gopaljichoubey12@cluster0.imgbed7.mongodb.net/?appName=Cluster0"
+MONGO_URI =  "mongodb+srv://gopaljichoubey12:gopaljichoubey12@cluster0.qslas8u.mongodb.net/?appName=Cluster0"
 
 # HARDCODED SUPER-OWNER IDS
-SUPER_OWNER_IDS = [8188380498, 7952327997, 7953147643, 8064493735] 
+SUPER_OWNER_IDS = [7952327997, 7636332528] 
 
 # DEVELOPER ATTRIBUTIONS
 DESIGNER_HANDLE = "Gopalji_choubey"
