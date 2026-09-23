@@ -11,9 +11,9 @@ logging.basicConfig(
 logger = logging.getLogger("MultiAccountSystem")
 
 # --- CREDENTIALS ---
-API_ID = int(os.getenv("TG_API_ID", "36160521"))
+API_ID = int(os.getenv("TG_API_ID", ""))
 API_HASH = os.getenv("TG_API_HASH", "7b0cadfee2786eb6c6eba3829e483223")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8760914841:AAFZCNplhZQr_BAyosbx1xkeSzHIMBselT0")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 # --- DATABASE ---
 MONGO_URI =  "mongodb+srv://gopaljichoubey12:gopaljichoubey12@cluster0.qslas8u.mongodb.net/?appName=Cluster0"
