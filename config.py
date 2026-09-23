@@ -19,7 +19,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8760914841:AAFZCNplhZQr_BAyosbx1xkeSzHIMBsel
 MONGO_URI =  "mongodb+srv://gopaljichoubey12:gopaljichoubey12@cluster0.qslas8u.mongodb.net/?appName=Cluster0"
 
 # HARDCODED SUPER-OWNER IDS
-SUPER_OWNER_IDS = [7952327997, 7636332528] 
+SUPER_OWNER_IDS = [7952327997, 7636332528, 7489988262] 
 
 # DEVELOPER ATTRIBUTIONS
 DESIGNER_HANDLE = "Gopalji_choubey"
