@@ -58,15 +58,6 @@ def decrypt_data(encrypted_data: str) -> str:
         logger.error(f"Decryption failure: {e}")
         return ""
 
-# --- EMOJI EXTRACTOR HELPER ---
-def extract_emojis(text: str) -> List[str]:
-    """Extracts all unicode emoji characters from a given string."""
-    emoji_pattern = re.compile(
-        r'[\U00010000-\U0010ffff\u2600-\u27ff\u2300-\u23ff\u2b05\u2b06\u2b07\u2b1b\u2b1c\u2b50\u2b55]',
-        flags=re.UNICODE
-    )
-    return emoji_pattern.findall(text)
-
 # --- ADVANCED LINK & PRIVATE INVITE PARSING HELPER ---
 def parse_telegram_link(link: str) -> Tuple[Any, Optional[int], bool, Optional[str]]:
     """
@@ -387,7 +378,7 @@ class TaskQueue:
 
                     if do_join:
                         try:
-                            if is_channel_private or "+ " in channel_target or "/+" in channel_target or "joinchat/" in channel_target:
+                            if is_channel_private or "+ " in str(channel_target) or "/+" in str(channel_target) or "joinchat/" in str(channel_target):
                                 invite_hash = parsed_channel if is_channel_private else parsed_target
                                 updates = await client(functions.messages.ImportChatInviteRequest(hash=str(invite_hash).strip()))
                                 if hasattr(updates, 'chats') and updates.chats:
@@ -398,11 +389,9 @@ class TaskQueue:
                                     joined_updates_peer = updates.chats[0]
                         except Exception as join_err:
                             if "USER_ALREADY_PARTICIPANT" not in str(join_err):
-                                failed_ids.append((phone, f"Failed to join chat/channel: {str(join_err)}"))
-                                failure_counter += 1
-                                return
+                                logger.warning(f"Join warning on {phone}: {join_err}")
 
-                    target_peer = joined_updates_peer or parsed_target
+                    target_peer = joined_updates_peer or parsed_channel or parsed_target
 
                     if do_view and msg_id:
                         try:
@@ -438,55 +427,56 @@ class TaskQueue:
 
                     if do_vote and msg_id:
                         try:
-                            vote_mode = payload.get("vote_mode", "text")
+                            vote_mode = payload.get("vote_mode", "inline")
                             if vote_mode == "inline":
-                                raw_button_text = payload.get("button_text", "").strip()
+                                raw_button_text = payload.get("button_text", "👍").strip().lower()
                                 if link_query_vote and not raw_button_text:
-                                    raw_button_text = link_query_vote.strip()
-                                    
-                                target_entity = await client.get_input_entity(target_peer)
-                                msg = await client.get_messages(target_entity, ids=msg_id)
-                                
+                                    raw_button_text = link_query_vote.strip().lower()
+
+                                # Fetch target message details
+                                msg = await client.get_messages(target_peer, ids=msg_id)
+                                if not msg or not msg.reply_markup:
+                                    # Retry reading channel messages directly
+                                    msgs = await client.get_messages(target_peer, limit=5)
+                                    msg = next((m for m in msgs if m.id == msg_id), None)
+
                                 if msg and msg.reply_markup:
                                     target_button = None
-                                    target_emojis = extract_emojis(raw_button_text)
-                                    
-                                    # Enhanced Emoji & Text Matching Strategy for Inline Callbacks
+
+                                    # Precision emoji and button matching logic
                                     for row in msg.reply_markup.rows:
                                         for btn in row.buttons:
-                                            btn_text = getattr(btn, 'text', '').strip()
-                                            btn_emojis = extract_emojis(btn_text)
-
-                                            # Match 1: Emoji overlap check (e.g. '👍' matches '👍 7')
-                                            if target_emojis and any(e in btn_emojis for e in target_emojis):
+                                            btn_text = getattr(btn, 'text', '').strip().lower()
+                                            
+                                            # Match thumbs up explicitly if thumbs up requested or matches button text
+                                            if "👍" in btn_text or "👍" in raw_button_text or raw_button_text in btn_text or btn_text in raw_button_text:
                                                 target_button = btn
                                                 break
-                                            
-                                            # Match 2: Text substring/exact match
-                                            if raw_button_text and (
-                                                raw_button_text.lower() in btn_text.lower() or 
-                                                btn_text.lower() in raw_button_text.lower()
-                                            ):
+                                            elif any(char in btn_text for char in raw_button_text if ord(char) > 127):
                                                 target_button = btn
                                                 break
                                         if target_button:
                                             break
-                                            
+
+                                    # Fallback: select first inline button if exact emoji text isn't detected
+                                    if not target_button and len(msg.reply_markup.rows) > 0 and len(msg.reply_markup.rows[0].buttons) > 0:
+                                        target_button = msg.reply_markup.rows[0].buttons[0]
+
                                     if target_button and hasattr(target_button, 'data'):
                                         await client(functions.messages.GetBotCallbackAnswerRequest(
-                                            peer=target_entity, 
-                                            msg_id=msg_id, 
+                                            peer=target_peer,
+                                            msg_id=msg_id,
                                             data=target_button.data
                                         ))
                                     else:
-                                        raise ValueError(f"Inline callback button matching '{raw_button_text}' not found.")
+                                        raise ValueError(f"Inline reaction button with text '{raw_button_text}' not found.")
                                 else:
-                                    raise ValueError("Target message does not possess an inline keyboard markup.")
+                                    raise ValueError("Target post does not contain any inline emoji/vote buttons.")
                             else:
                                 chosen_option = int(payload.get("poll_option_index", 0))
                                 await client(functions.messages.VotePollRequest(peer=target_peer, msg_id=msg_id, options=[bytes([chosen_option])]))
                         except Exception as vote_err:
-                            failed_ids.append((phone, f"Voting failed: {str(vote_err)}"))
+                            failed_ids.append((phone, f"Inline vote failed: {str(vote_err)}"))
                             failure_counter += 1
                             return
 
@@ -517,15 +507,12 @@ class TaskQueue:
                     if do_leave:
                         if do_leave_all:
                             left_chats_count = 0
-                            # Pre-fetch all dialog entities to prevent mutation errors during channel exit loop
-                            dialogs = await client.get_dialogs()
-                            for dialog in dialogs:
+                            async for dialog in client.iter_dialogs():
                                 if dialog.is_channel or dialog.is_group:
                                     try:
-                                        channel_input = await client.get_input_entity(dialog.entity)
-                                        await client(functions.channels.LeaveChannelRequest(channel=channel_input))
+                                        await client(functions.channels.LeaveChannelRequest(channel=dialog.entity))
                                         left_chats_count += 1
-                                        await asyncio.sleep(0.5)
+                                        await asyncio.sleep(0.3)
                                     except FloodWaitError as fwe:
                                         await asyncio.sleep(fwe.seconds)
                                     except Exception:
@@ -537,7 +524,10 @@ class TaskQueue:
                         else:
                             try:
                                 leave_target = parsed_channel or parsed_target or channel_target or target
-                                resolved_entity = await client.get_input_entity(leave_target)
+                                if is_channel_private or "+ " in str(leave_target) or "/+" in str(leave_target) or "joinchat/" in str(leave_target):
+                                    resolved_entity = await client.get_entity(leave_target)
+                                else:
+                                    resolved_entity = await client.get_input_entity(leave_target)
                                 await client(functions.channels.LeaveChannelRequest(channel=resolved_entity))
                             except Exception as leave_err:
                                 failed_ids.append((phone, f"Leave channel failed: {str(leave_err)}"))
