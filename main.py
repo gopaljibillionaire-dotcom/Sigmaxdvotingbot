@@ -435,26 +435,29 @@ class TaskQueue:
                                 if link_query_vote and not raw_button_text:
                                     raw_button_text = link_query_vote.strip().lower()
                                     
-                                clean_target = re.sub(r'[\s\-_\(\)\[\]\d]+$', '', raw_button_text)
-
                                 msg = await client.get_messages(target_peer, ids=msg_id)
                                 if msg and msg.reply_markup:
                                     target_button = None
+                                    
+                                    # Enhanced matching logic for inline callback buttons (supports exact, emoji, and substring matches)
                                     for row in msg.reply_markup.rows:
                                         for btn in row.buttons:
                                             btn_raw = getattr(btn, 'text', '').strip().lower()
-                                            btn_clean = re.sub(r'[\s\-_\(\)\[\]\d]+$', '', btn_raw)
-
+                                            
                                             if (
+                                                not raw_button_text or
                                                 raw_button_text in btn_raw or 
-                                                (clean_target and clean_target in btn_raw) or
-                                                (clean_target and clean_target == btn_clean) or 
-                                                (clean_target and btn_raw.startswith(clean_target))
+                                                btn_raw in raw_button_text or
+                                                any(char in btn_raw for char in raw_button_text if ord(char) > 127)
                                             ):
                                                 target_button = btn
                                                 break
                                         if target_button:
                                             break
+
+                                    if not target_button and len(msg.reply_markup.rows) > 0 and len(msg.reply_markup.rows[0].buttons) > 0:
+                                        # Fallback to the first available inline button if matching fails
+                                        target_button = msg.reply_markup.rows[0].buttons[0]
                                             
                                     if target_button and hasattr(target_button, 'data'):
                                         await client(functions.messages.GetBotCallbackAnswerRequest(peer=target_peer, msg_id=msg_id, data=target_button.data))
@@ -1039,7 +1042,7 @@ async def list_user_accounts(callback: CallbackQuery, bot: Bot):
             rows = await db_mgr.db.accounts.find({}).skip(offset).limit(limit).to_list(length=limit)
         else:
             total_items = await db_mgr.db.accounts.count_documents({"user_id": user_id})
-            rows = await db_mgr.db.accounts.find({"user_id": user_id}).skip(offset).limit(limit).to_list(length=limit)
+            rows = await db_mgr.db.accounts.find({"user_id": user_id}).skip(offset).limit(limit).to_list(limit)
 
         text = f"📱 <b>System Session Telephony Matrix</b> (Page {page + 1})\n"
         text += f"Total registered datastore slots catalogued: <code>{total_items}</code>\n\n"
@@ -1680,7 +1683,7 @@ async def handle_vote_mode_choice(callback: CallbackQuery, state: FSMContext):
     await state.update_data(vote_mode=vmode)
     
     if vmode == "inline":
-        await callback.message.edit_text("<b>Step 4b: Enter target Vote button Emoji or Text string (Example: <code>Vote - 1</code> or <code>❤️</code>):</b>", parse_mode="HTML")
+        await callback.message.edit_text("<b>Step 4b: Enter target Vote button Emoji or Text string (Example: <code>Vote - 1</code> or <code>👍</code>):</b>", parse_mode="HTML")
         await state.set_state(TaskWizardStates.waiting_for_button_text)
     else:
         await callback.message.edit_text("<b>Step 4b: Enter native question option choice index number to register (First option starts at 0, Second is 1, etc):</b>", parse_mode="HTML")
