@@ -68,7 +68,6 @@ def parse_telegram_link(link: str) -> Tuple[Any, Optional[int], bool, Optional[s
         return None, None, False, None
         
     extracted_query = None
-    # Extract query/emoji target attached to links (e.g., ?vote=❤️ or link containing emojis)
     if "?vote=" in link:
         parts = link.split("?vote=")
         link = parts[0]
@@ -433,7 +432,6 @@ class TaskQueue:
                             vote_mode = payload.get("vote_mode", "text")
                             if vote_mode == "inline":
                                 raw_button_text = payload.get("button_text", "").strip().lower()
-                                # Fallback to link query extracted vote string if provided
                                 if link_query_vote and not raw_button_text:
                                     raw_button_text = link_query_vote.strip().lower()
                                     
@@ -444,10 +442,9 @@ class TaskQueue:
                                     target_button = None
                                     for row in msg.reply_markup.rows:
                                         for btn in row.buttons:
-                                            btn_raw = btn.text.strip().lower()
+                                            btn_raw = getattr(btn, 'text', '').strip().lower()
                                             btn_clean = re.sub(r'[\s\-_\(\)\[\]\d]+$', '', btn_raw)
 
-                                            # Direct emoji match or text substring match logic
                                             if (
                                                 raw_button_text in btn_raw or 
                                                 (clean_target and clean_target in btn_raw) or
@@ -458,7 +455,8 @@ class TaskQueue:
                                                 break
                                         if target_button:
                                             break
-                                    if target_button and isinstance(target_button, tg_types.KeyboardButtonCallback):
+                                            
+                                    if target_button and hasattr(target_button, 'data'):
                                         await client(functions.messages.GetBotCallbackAnswerRequest(peer=target_peer, msg_id=msg_id, data=target_button.data))
                                     else:
                                         raise ValueError(f"Inline callback button matching '{raw_button_text}' not found.")
@@ -515,7 +513,11 @@ class TaskQueue:
                                 return
                         else:
                             try:
-                                resolved_entity = await client.get_input_entity(target_peer)
+                                leave_target = parsed_channel or parsed_target or channel_target or target
+                                if is_channel_private or "+ " in str(leave_target) or "/+" in str(leave_target) or "joinchat/" in str(leave_target):
+                                    resolved_entity = await client.get_entity(leave_target)
+                                else:
+                                    resolved_entity = await client.get_input_entity(leave_target)
                                 await client(functions.channels.LeaveChannelRequest(channel=resolved_entity))
                             except Exception as leave_err:
                                 failed_ids.append((phone, f"Leave channel failed: {str(leave_err)}"))
@@ -591,7 +593,8 @@ class TaskQueue:
         except Exception:
             pass
 
-        target_display = "ALL CHANNELS DEPLOYMENT" if payload.get("leave_mode") == "all" else f"<code>{payload.get('target', 'N/A')}</code>"
+        target_display = "ALL CHANNELS DEPLOYMENT" if payload.get("leave_mode") == "all" else f"<code>{payload.get('channel_target', payload.get('target', 'N/A'))}</code>"
+        secondary_target_display = f"<code>{payload.get('target', 'N/A')}</code>"
 
         failure_log_details = ""
         if len(failed_ids) > 20:
@@ -607,7 +610,7 @@ class TaskQueue:
             f"⚡ Action Code Execution: <code>{task_type.upper()}</code>\n"
             f"👤 Creator Node Profile: {user_info}\n"
             f"🔗 Target Location Path: {target_display}\n"
-            f"📢 Secondary Target Scope: <code>{payload.get('channel_target', 'N/A')}</code>\n"
+            f"📢 Secondary Target Scope: {secondary_target_display}\n"
             f"🏎 Speed Interval Throttle: <code>{speed_mode.upper()}</code>\n\n"
             f"📊 <b>Performance Analytics Reports:</b>\n"
             f"✅ Success Threshold: <code>{success_counter}/{total_accounts}</code> ({success_pct_final}%)\n"
@@ -1596,7 +1599,7 @@ async def task_hub_process_speed(callback: CallbackQuery, state: FSMContext):
         )
         await state.set_state(TaskWizardStates.waiting_for_leave_choice)
     elif "react" in task_type or "vote" in task_type or task_type in ["view", "speed"]:
-        await callback.message.edit_text("<b>Step 2: Provide targeted public handle destination or private link reference (e.g. @channelname or -100xxxxx):</b>", parse_mode="HTML")
+        await callback.message.edit_text("<b>Step 2: Provide targeted public handle destination or private link reference (e.g. https://t.me/+Ouk6ifPLdLFmMzZl or @channelname):</b>", parse_mode="HTML")
         await state.set_state(TaskWizardStates.waiting_for_channel_link)
     elif task_type == "refer":
         await callback.message.edit_text("<b>Step 2: Input target referral link parameter query string value (Example: https://t.me/Bot?start=123):</b>", parse_mode="HTML")
@@ -1622,7 +1625,7 @@ async def task_hub_process_leave_choice(callback: CallbackQuery, state: FSMConte
 async def task_hub_process_channel_link(message: Message, state: FSMContext):
     channel_target = message.text.strip()
     await state.update_data(channel_target=channel_target)
-    await message.answer("<b>Step 3: Paste message tracker specific structural index link URL (Example: https://t.me/channelname/123):</b>", parse_mode="HTML")
+    await message.answer("<b>Step 3: Paste message tracker specific structural index link URL (Example: https://t.me/c/4424532852/2 or https://t.me/channelname/123):</b>", parse_mode="HTML")
     await state.set_state(TaskWizardStates.waiting_for_post_link)
 
 @router.message(StateFilter(TaskWizardStates.waiting_for_post_link))
