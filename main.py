@@ -67,10 +67,10 @@ def parse_telegram_link(link: str) -> Tuple[Any, Optional[int], bool, Optional[s
     """
     Returns: (target_peer, msg_id, is_private, extracted_vote_query)
     """
-    link = link.strip()
     if not link:
         return None, None, False, None
-        
+    
+    link = str(link).strip()
     extracted_query = None
     if "?vote=" in link:
         parts = link.split("?vote=")
@@ -80,24 +80,28 @@ def parse_telegram_link(link: str) -> Tuple[Any, Optional[int], bool, Optional[s
     if re.match(r'^-?\d+$', link):
         return int(link), None, False, extracted_query
 
-    # Match private channel links: t.me/c/1234567890/100
+    # Match private channel links with message ID: t.me/c/4451017131/2
     private_match = re.search(r't\.me/c/(\d+)/(\d+)', link)
     if private_match:
         channel_id = int(f"-100{private_match.group(1)}")
         msg_id = int(private_match.group(2))
         return channel_id, msg_id, True, extracted_query
 
-    # Match private channel links without message ID: t.me/c/1234567890
+    # Match private channel links without message ID: t.me/c/4451017131
     private_chan_match = re.search(r't\.me/c/(\d+)', link)
     if private_chan_match:
         channel_id = int(f"-100{private_chan_match.group(1)}")
         return channel_id, None, True, extracted_query
 
-    # Match invite links: t.me/+hash or t.me/joinchat/hash
+    # Match invite links: t.me/+GGBRqflFv0sxOGM1 or t.me/joinchat/GGBRqflFv0sxOGM1 or raw hash
     if "+" in link or "joinchat/" in link:
         hash_match = re.search(r'(?:joinchat/|\+)([^/\s?]+)', link)
         if hash_match:
             return hash_match.group(1), None, True, extracted_query
+        return link, None, True, extracted_query
+
+    # Match raw invite hash strings if passed directly
+    if re.match(r'^[A-Za-z0-9_-]{16,32}$', link):
         return link, None, True, extracted_query
         
     msg_match = re.search(r't\.me/([^/]+)/(\d+)', link)
@@ -373,9 +377,8 @@ class TaskQueue:
                     target = payload.get("target", "")
                     channel_target = payload.get("channel_target", target)
                     
-                    # Handle channel target based on private or public type selection
-                    if channel_type == "private":
-                        channel_target = payload.get("channel_target", DEFAULT_PRIVATE_JOIN_LINK)
+                    if channel_type == "private" and not channel_target:
+                        channel_target = DEFAULT_PRIVATE_JOIN_LINK
                     
                     do_leave_all = (task_type == "leave" and payload.get("leave_mode") == "all")
 
@@ -393,7 +396,7 @@ class TaskQueue:
 
                     joined_updates_peer = None
 
-                    # Handle joining channels (both public and private invite links)
+                    # Join private hash or channel before resolving message entities
                     if do_join:
                         targets_to_check = [
                             (parsed_channel or channel_target, is_channel_private or channel_type == "private"),
@@ -405,7 +408,7 @@ class TaskQueue:
                                 continue
                             try:
                                 target_str = str(p_target).strip()
-                                is_invite_hash = p_is_priv or "+" in target_str or "joinchat/" in target_str
+                                is_invite_hash = p_is_priv or "+" in target_str or "joinchat/" in target_str or re.match(r'^[A-Za-z0-9_-]{16,32}$', target_str)
                                 
                                 if is_invite_hash and not isinstance(p_target, int):
                                     invite_hash = target_str.replace("https://t.me/+", "").replace("https://t.me/joinchat/", "").replace("+", "").strip()
@@ -428,7 +431,7 @@ class TaskQueue:
                                 if "USER_ALREADY_PARTICIPANT" not in str(join_err):
                                     logger.warning(f"Join warning on {phone}: {join_err}")
 
-                    # Resolve target peer properly
+                    # Determine target peer entity safely
                     raw_peer = joined_updates_peer or parsed_channel or parsed_target or channel_target or target
                     target_peer = None
                     
@@ -437,7 +440,7 @@ class TaskQueue:
                     except Exception:
                         try:
                             target_peer = await client.get_input_entity(raw_peer)
-                        except Exception as resolve_err:
+                        except Exception:
                             target_peer = raw_peer
 
                     if do_view and msg_id:
@@ -790,7 +793,7 @@ def get_task_types_keyboard(active_count: int) -> InlineKeyboardMarkup:
 
 def get_channel_type_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔒 Private Channel", callback_data="set_chan_type:private", style="primary")],
+        [InlineKeyboardButton(text="🔒 Private Invite Link / Hash", callback_data="set_chan_type:private", style="primary")],
         [InlineKeyboardButton(text="🌐 Public Channel", callback_data="set_chan_type:public", style="success")]
     ])
 
@@ -1632,7 +1635,7 @@ async def task_hub_process_routing(callback: CallbackQuery, state: FSMContext):
 
 async def proceed_to_channel_type_selection(message: Message, state: FSMContext):
     await message.edit_text(
-        "<b>Step 1b: Is your target location a Private Channel or a Public Channel?</b>",
+        "<b>Step 1b: Target channel accessibility mode:</b>",
         reply_markup=get_channel_type_keyboard(),
         parse_mode="HTML"
     )
@@ -1674,8 +1677,8 @@ async def task_hub_process_speed(callback: CallbackQuery, state: FSMContext):
     elif "react" in task_type or "vote" in task_type or task_type in ["view", "speed"]:
         if channel_type == "private":
             await callback.message.edit_text(
-                f"<b>Step 2: Paste private channel join/invite request link:</b>\n"
-                f"<i>(Send your invite link, or leave empty/type default to use: <code>{DEFAULT_PRIVATE_JOIN_LINK}</code>)</i>", 
+                f"<b>Step 2: Paste private channel join link or invite hash (e.g. <code>GGBRqflFv0sxOGM1</code>):</b>\n"
+                f"<i>(Send your invite link/hash, or type <code>default</code> to use fallback: <code>{DEFAULT_PRIVATE_JOIN_LINK}</code>)</i>", 
                 parse_mode="HTML"
             )
         else:
@@ -1687,8 +1690,8 @@ async def task_hub_process_speed(callback: CallbackQuery, state: FSMContext):
     else:
         if channel_type == "private":
             await callback.message.edit_text(
-                f"<b>Step 2: Paste private channel join/invite request link:</b>\n"
-                f"<i>(Send your invite link, or leave empty/type default to use: <code>{DEFAULT_PRIVATE_JOIN_LINK}</code>)</i>", 
+                f"<b>Step 2: Paste private channel join link or invite hash:</b>\n"
+                f"<i>(Or send default to use fallback: <code>{DEFAULT_PRIVATE_JOIN_LINK}</code>)</i>", 
                 parse_mode="HTML"
             )
         else:
@@ -1709,8 +1712,8 @@ async def task_hub_process_leave_choice(callback: CallbackQuery, state: FSMConte
         channel_type = data.get("channel_type", "public")
         if channel_type == "private":
             await callback.message.edit_text(
-                f"<b>Step 3: Paste private channel join/invite link:</b>\n"
-                f"<i>(Or send default to use: <code>{DEFAULT_PRIVATE_JOIN_LINK}</code>)</i>", 
+                f"<b>Step 3: Paste private channel invite hash or join link:</b>\n"
+                f"<i>(Or send default to use fallback: <code>{DEFAULT_PRIVATE_JOIN_LINK}</code>)</i>", 
                 parse_mode="HTML"
             )
         else:
@@ -1727,7 +1730,7 @@ async def task_hub_process_channel_link(message: Message, state: FSMContext):
         channel_target = DEFAULT_PRIVATE_JOIN_LINK
 
     await state.update_data(channel_target=channel_target)
-    await message.answer("<b>Step 3: Paste message tracker specific structural index link URL (Example: https://t.me/c/4424532852/2 or https://t.me/channelname/123):</b>", parse_mode="HTML")
+    await message.answer("<b>Step 3: Paste message tracker specific link or Channel ID/Message ID (Example: <code>https://t.me/c/4451017131/2</code> or <code>-1004451017131/2</code>):</b>", parse_mode="HTML")
     await state.set_state(TaskWizardStates.waiting_for_post_link)
 
 @router.message(StateFilter(TaskWizardStates.waiting_for_post_link))
@@ -1741,7 +1744,7 @@ async def task_hub_process_target(message: Message, state: FSMContext, bot: Bot)
 
     await state.update_data(target=target)
     
-    _, _, _, link_query_vote = parse_telegram_link(target)
+    _, link_msg_id, _, link_query_vote = parse_telegram_link(target)
     task_type = data.get("task_type")
 
     if task_type in ["join", "leave", "refer", "view", "speed"]:
