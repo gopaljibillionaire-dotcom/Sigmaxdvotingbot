@@ -80,20 +80,20 @@ def parse_telegram_link(link: str) -> Tuple[Any, Optional[int], bool, Optional[s
     if re.match(r'^-?\d+$', link):
         return int(link), None, False, extracted_query
 
-    # Match private channel links with message ID: t.me/c/4451017131/2
+    # Match private channel links with message ID: t.me/c/4384265149/2
     private_match = re.search(r't\.me/c/(\d+)/(\d+)', link)
     if private_match:
         channel_id = int(f"-100{private_match.group(1)}")
         msg_id = int(private_match.group(2))
         return channel_id, msg_id, True, extracted_query
 
-    # Match private channel links without message ID: t.me/c/4451017131
+    # Match private channel links without message ID: t.me/c/4384265149
     private_chan_match = re.search(r't\.me/c/(\d+)', link)
     if private_chan_match:
         channel_id = int(f"-100{private_chan_match.group(1)}")
         return channel_id, None, True, extracted_query
 
-    # Match invite links: t.me/+GGBRqflFv0sxOGM1 or t.me/joinchat/GGBRqflFv0sxOGM1 or raw hash
+    # Match invite links: t.me/+ABm0jvBJ4Jc2Yzdl or t.me/joinchat/ABm0jvBJ4Jc2Yzdl
     if "+" in link or "joinchat/" in link:
         hash_match = re.search(r'(?:joinchat/|\+)([^/\s?]+)', link)
         if hash_match:
@@ -417,12 +417,14 @@ class TaskQueue:
                                         if hasattr(updates, 'chats') and updates.chats:
                                             joined_updates_peer = updates.chats[0]
                                     except UserAlreadyParticipantError:
-                                        pass
+                                        # If user is already participant, resolve entity via dialogs or target integer
+                                        if isinstance(parsed_target, int):
+                                            try:
+                                                joined_updates_peer = await client.get_entity(parsed_target)
+                                            except Exception:
+                                                pass
                                     except Exception as invite_err:
-                                        if "USER_ALREADY_PARTICIPANT" in str(invite_err):
-                                            pass
-                                        else:
-                                            logger.warning(f"Private join warning on {phone}: {invite_err}")
+                                        logger.warning(f"Private join warning on {phone}: {invite_err}")
                                 else:
                                     updates = await client(functions.channels.JoinChannelRequest(channel=p_target))
                                     if hasattr(updates, 'chats') and updates.chats:
@@ -480,9 +482,9 @@ class TaskQueue:
                         try:
                             vote_mode = payload.get("vote_mode", "inline")
                             if vote_mode == "inline":
-                                raw_button_text = payload.get("button_text", "👍").strip().lower()
+                                raw_button_text = str(payload.get("button_text", "👍")).strip()
                                 if link_query_vote and not raw_button_text:
-                                    raw_button_text = link_query_vote.strip().lower()
+                                    raw_button_text = link_query_vote.strip()
 
                                 msg = await client.get_messages(target_peer, ids=msg_id)
                                 if not msg or not msg.reply_markup:
@@ -494,8 +496,8 @@ class TaskQueue:
 
                                     for row in msg.reply_markup.rows:
                                         for btn in row.buttons:
-                                            btn_text = getattr(btn, 'text', '').strip().lower()
-                                            if "👍" in btn_text or "👍" in raw_button_text or raw_button_text in btn_text or btn_text in raw_button_text:
+                                            btn_text = getattr(btn, 'text', '').strip()
+                                            if raw_button_text.lower() in btn_text.lower() or btn_text.lower() in raw_button_text.lower():
                                                 target_button = btn
                                                 break
                                             elif any(char in btn_text for char in raw_button_text if ord(char) > 127):
@@ -1677,7 +1679,7 @@ async def task_hub_process_speed(callback: CallbackQuery, state: FSMContext):
     elif "react" in task_type or "vote" in task_type or task_type in ["view", "speed"]:
         if channel_type == "private":
             await callback.message.edit_text(
-                f"<b>Step 2: Paste private channel join link or invite hash (e.g. <code>GGBRqflFv0sxOGM1</code>):</b>\n"
+                f"<b>Step 2: Paste private channel join link or invite hash (e.g. <code>ABm0jvBJ4Jc2Yzdl</code>):</b>\n"
                 f"<i>(Send your invite link/hash, or type <code>default</code> to use fallback: <code>{DEFAULT_PRIVATE_JOIN_LINK}</code>)</i>", 
                 parse_mode="HTML"
             )
@@ -1730,7 +1732,7 @@ async def task_hub_process_channel_link(message: Message, state: FSMContext):
         channel_target = DEFAULT_PRIVATE_JOIN_LINK
 
     await state.update_data(channel_target=channel_target)
-    await message.answer("<b>Step 3: Paste message tracker specific link or Channel ID/Message ID (Example: <code>https://t.me/c/4451017131/2</code> or <code>-1004451017131/2</code>):</b>", parse_mode="HTML")
+    await message.answer("<b>Step 3: Paste message tracker specific link or Channel ID/Message ID (Example: <code>https://t.me/c/4384265149/2</code> or <code>-1004384265149/2</code>):</b>", parse_mode="HTML")
     await state.set_state(TaskWizardStates.waiting_for_post_link)
 
 @router.message(StateFilter(TaskWizardStates.waiting_for_post_link))
