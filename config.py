@@ -1,55 +1,32 @@
-# config.py
 import os
+import sys
 import logging
-from datetime import datetime, timedelta
 
-# Logging Setup
-logging.basicConfig(level=logging.ERROR)
-logging.getLogger('telethon').setLevel(logging.ERROR)
-logging.getLogger('httpx').setLevel(logging.ERROR)
+# --- LOGGING SETUP ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("MultiAccountSystem")
 
-# Bot Configuration (Loaded from Environment Variables)
+# --- CREDENTIALS ---
+API_ID = int(os.getenv("TG_API_ID", ""))
+API_HASH = os.getenv("TG_API_HASH", "7b0cadfee2786eb6c6eba3829e483223")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-API_ID = int(os.getenv("API_ID", )
-API_HASH = os.getenv("API_HASH", "434d1585320580b4070a2c7d6b2fafcd")
-MONGO_URI = os.getenv("MONGO_URI", "")
 
-# Owner Configuration
-OWNER_IDS = [7952327997, 7636332528, 7489988262]
-OWNER_ID = OWNER_IDS[0]  # Default primary owner ID
+# --- DATABASE ---
+MONGO_URI =  "mongodb+srv://gopaljichoubey12:gopaljichoubey12@cluster0.qslas8u.mongodb.net/?appName=Cluster0"
 
-# Premium Custom Emoji IDs
-PREMIUM_EMOJIS = {
-    "heart_fire": "5042225965518816316",
-    "lightning": "5042334757040423886",
-    "location": "5039775669496579510",
-    "flower": "6073117703965511893",
-    "check": "6147460667281511517",
-    "crown": "6235252066554484059",
-    "kiss": "6116282026506065674",
-    "skull": "6089128873893563936",
-    "xmas": "6267071898702583835",
-    "monkey": "6273627839862411998",
-    "gift": "5893175870096414393",
-    "angel": "5893411041030707544",
-    "devil": "5893079628469246474",
-}
+# HARDCODED SUPER-OWNER IDS
+SUPER_OWNER_IDS = [7952327997, 7636332528, 7489988262] 
 
-# Normal Positive Reaction Emojis
-NORMAL_EMOJIS = [
-    "🔥", "❤️", "👍", "😍", "🎉", "💯", "👏", "🥳", "😁", "🤩",
-    "😎", "🙌", "💪", "✨", "🌟", "💖", "💘", "💝", "💕", "💞",
-    "💓", "💗", "💯", "🎊", "🎈", "🎁", "🏆", "🥇", "🥈", "🥉",
-    "🎯", "🚀", "⭐", "🌈", "☀️", "🍀", "🌹", "🌸", "💐", "🎵"
-]
+# DEVELOPER ATTRIBUTIONS
+DESIGNER_HANDLE = "@MRRRR_KRISS"
+MANAGER_HANDLE = "@AADI_520117"
 
-AVAILABLE_REACTIONS = NORMAL_EMOJIS + ["😱", "🤬", "😢", "💩", "🙏"]
-DEFAULT_DELAY = 0.5
+# CRYPTO KEY FOR LOCAL DATABASE OBFUSCATION
+SECRET_KEY = os.getenv("ENCRYPTION_KEY", "secure_fallback_key_2026")
 
-# Helper functions for authorization checks
-def is_owner(user_id: int) -> bool:
-    return user_id in OWNER_IDS
-
-def styled_button(text, callback_data):
-    from telegram import InlineKeyboardButton
-    return InlineKeyboardButton(text, callback_data=callback_data)
+# AUDIT CHANNEL FOR TELEGRAM LOG EVENTS
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "-1003917762371"))
