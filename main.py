@@ -29,7 +29,8 @@ from telethon.errors import (
     SessionPasswordNeededError,
     PhoneCodeInvalidError,
     PasswordHashInvalidError,
-    FloodWaitError
+    FloodWaitError,
+    UserAlreadyParticipantError
 )
 
 # MongoDB async driver
@@ -76,13 +77,21 @@ def parse_telegram_link(link: str) -> Tuple[Any, Optional[int], bool, Optional[s
     if re.match(r'^-?\d+$', link):
         return int(link), None, False, extracted_query
 
+    # Match private channel links: t.me/c/1234567890/100
     private_match = re.search(r't\.me/c/(\d+)/(\d+)', link)
     if private_match:
         channel_id = int(f"-100{private_match.group(1)}")
         msg_id = int(private_match.group(2))
-        return channel_id, msg_id, False, extracted_query
+        return channel_id, msg_id, True, extracted_query
 
-    if "+ " in link or "/+" in link or "joinchat/" in link:
+    # Match private channel links without message ID: t.me/c/1234567890
+    private_chan_match = re.search(r't\.me/c/(\d+)', link)
+    if private_chan_match:
+        channel_id = int(f"-100{private_chan_match.group(1)}")
+        return channel_id, None, True, extracted_query
+
+    # Match invite links: t.me/+hash or t.me/joinchat/hash
+    if "+" in link or "joinchat/" in link:
         hash_match = re.search(r'(?:joinchat/|\+)([^/\s?]+)', link)
         if hash_match:
             return hash_match.group(1), None, True, extracted_query
@@ -375,38 +384,57 @@ class TaskQueue:
 
                     joined_updates_peer = None
 
+                    # Handle joining channels (both public and private invite links)
                     if do_join:
-                        try:
-                            if is_channel_private or "+ " in str(channel_target) or "/+" in str(channel_target) or "joinchat/" in str(channel_target) or is_target_private:
-                                invite_hash = parsed_channel if is_channel_private else parsed_target
-                                try:
-                                    updates = await client(functions.messages.ImportChatInviteRequest(hash=str(invite_hash).strip()))
+                        targets_to_check = [
+                            (parsed_channel or channel_target, is_channel_private),
+                            (parsed_target or target, is_target_private)
+                        ]
+                        
+                        for p_target, p_is_priv in targets_to_check:
+                            if not p_target:
+                                continue
+                            try:
+                                target_str = str(p_target).strip()
+                                is_invite_hash = p_is_priv or "+" in target_str or "joinchat/" in target_str
+                                
+                                if is_invite_hash and not isinstance(p_target, int):
+                                    invite_hash = target_str.replace("https://t.me/+", "").replace("https://t.me/joinchat/", "").replace("+", "").strip()
+                                    try:
+                                        updates = await client(functions.messages.ImportChatInviteRequest(hash=invite_hash))
+                                        if hasattr(updates, 'chats') and updates.chats:
+                                            joined_updates_peer = updates.chats[0]
+                                    except UserAlreadyParticipantError:
+                                        pass
+                                    except Exception as invite_err:
+                                        if "USER_ALREADY_PARTICIPANT" in str(invite_err):
+                                            pass
+                                        else:
+                                            logger.warning(f"Private join warning on {phone}: {invite_err}")
+                                else:
+                                    updates = await client(functions.channels.JoinChannelRequest(channel=p_target))
                                     if hasattr(updates, 'chats') and updates.chats:
                                         joined_updates_peer = updates.chats[0]
-                                except Exception as join_err:
-                                    if "USER_ALREADY_PARTICIPANT" in str(join_err):
-                                        # Resolve entity directly if already joined
-                                        joined_updates_peer = await client.get_entity(str(invite_hash).strip())
-                                    else:
-                                        raise join_err
-                            else:
-                                updates = await client(functions.channels.JoinChannelRequest(channel=parsed_channel or parsed_target))
-                                if hasattr(updates, 'chats') and updates.chats:
-                                    joined_updates_peer = updates.chats[0]
-                        except Exception as join_err:
-                            if "USER_ALREADY_PARTICIPANT" not in str(join_err):
-                                logger.warning(f"Join warning on {phone}: {join_err}")
+                            except Exception as join_err:
+                                if "USER_ALREADY_PARTICIPANT" not in str(join_err):
+                                    logger.warning(f"Join warning on {phone}: {join_err}")
 
-                    # Ensure target_peer is resolved to an actual Telethon Entity
-                    raw_peer = joined_updates_peer or parsed_channel or parsed_target
+                    # Resolve target peer properly
+                    raw_peer = joined_updates_peer or parsed_channel or parsed_target or channel_target or target
+                    target_peer = None
+                    
                     try:
                         target_peer = await client.get_entity(raw_peer)
                     except Exception:
-                        target_peer = raw_peer
+                        try:
+                            target_peer = await client.get_input_entity(raw_peer)
+                        except Exception as resolve_err:
+                            target_peer = raw_peer
 
                     if do_view and msg_id:
                         try:
-                            await client(functions.messages.GetMessagesViewsRequest(peer=target_peer, id=[msg_id], increment=True))
+                            peer_entity = await client.get_input_entity(target_peer)
+                            await client(functions.messages.GetMessagesViewsRequest(peer=peer_entity, id=[msg_id], increment=True))
                         except Exception as view_err:
                             failed_ids.append((phone, f"View increment failed: {str(view_err)}"))
                             failure_counter += 1
@@ -468,8 +496,9 @@ class TaskQueue:
                                         target_button = msg.reply_markup.rows[0].buttons[0]
 
                                     if target_button and hasattr(target_button, 'data'):
+                                        peer_entity = await client.get_input_entity(target_peer)
                                         await client(functions.messages.GetBotCallbackAnswerRequest(
-                                            peer=target_peer,
+                                            peer=peer_entity,
                                             msg_id=msg_id,
                                             data=target_button.data
                                         ))
@@ -479,7 +508,8 @@ class TaskQueue:
                                     raise ValueError("Target post does not contain any inline emoji/vote buttons.")
                             else:
                                 chosen_option = int(payload.get("poll_option_index", 0))
-                                await client(functions.messages.VotePollRequest(peer=target_peer, msg_id=msg_id, options=[bytes([chosen_option])]))
+                                peer_entity = await client.get_input_entity(target_peer)
+                                await client(functions.messages.VotePollRequest(peer=peer_entity, msg_id=msg_id, options=[bytes([chosen_option])]))
                         except Exception as vote_err:
                             failed_ids.append((phone, f"Inline vote failed: {str(vote_err)}"))
                             failure_counter += 1
@@ -529,10 +559,7 @@ class TaskQueue:
                         else:
                             try:
                                 leave_target = parsed_channel or parsed_target or channel_target or target
-                                if is_channel_private or "+ " in str(leave_target) or "/+" in str(leave_target) or "joinchat/" in str(leave_target):
-                                    resolved_entity = await client.get_entity(leave_target)
-                                else:
-                                    resolved_entity = await client.get_input_entity(leave_target)
+                                resolved_entity = await client.get_input_entity(leave_target)
                                 await client(functions.channels.LeaveChannelRequest(channel=resolved_entity))
                             except Exception as leave_err:
                                 failed_ids.append((phone, f"Leave channel failed: {str(leave_err)}"))
