@@ -1,32 +1,39 @@
-import os
-import sys
-import logging
+# config.py
 
-# --- LOGGING SETUP ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger("MultiAccountSystem")
+BOT_TOKEN = "8983484049:AAGstgl80-20c6pF0Pvgiz2FLA2YWpMQ3pM"
+API_ID = 34271171
+API_HASH = "434d1585320580b4070a2c7d6b2fafcd"
+OWNER_ID = [7952327997, 7636332528, 7489988262] 
 
-# --- CREDENTIALS ---
-API_ID = int(os.getenv("TG_API_ID", ""))
-API_HASH = os.getenv("TG_API_HASH", "7b0cadfee2786eb6c6eba3829e483223")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-
-# --- DATABASE ---
+# MongoDB Configuration
 MONGO_URI =  "mongodb+srv://gopaljichoubey12:gopaljichoubey12@cluster0.qslas8u.mongodb.net/?appName=Cluster0"
+DB_NAME = "automation_bot"
 
-# HARDCODED SUPER-OWNER IDS
-SUPER_OWNER_IDS = [7952327997, 7636332528, 7489988262] 
+# ========== PREMIUM CUSTOM EMOJI IDs ==========
+PREMIUM_EMOJIS = {
+    "heart_fire": "5042225965518816316",
+    "lightning": "5042334757040423886",
+    "location": "5039775669496579510",
+    "flower": "6073117703965511893",
+    "check": "6147460667281511517",
+    "crown": "6235252066554484059",
+    "kiss": "6116282026506065674",
+    "skull": "6089128873893563936",
+    "xmas": "6267071898702583835",
+    "monkey": "6273627839862411998",
+    "gift": "5893175870096414393",
+    "angel": "5893411041030707544",
+    "devil": "5893079628469246474",
+}
 
-# DEVELOPER ATTRIBUTIONS
-DESIGNER_HANDLE = "@MRRRR_KRISS"
-MANAGER_HANDLE = "@AADI_520117"
+# Expanded positive reaction emojis for multi-select
+NORMAL_EMOJIS = [
+    "🔥", "❤️", "👍", "😍", "🎉", "💯", "👏", "🥳", "😁", "🤩",
+    "😎", "🙌", "💪", "✨", "🌟", "💖", "💘", "💝", "💕", "💞",
+    "💓", "💗", "💯", "🎊", "🎈", "🎁", "🏆", "🥇", "🥈", "🥉",
+    "🎯", "🚀", "⭐", "🌈", "☀️", "🍀", "🌹", "🌸", "💐", "🎵"
+]
 
-# CRYPTO KEY FOR LOCAL DATABASE OBFUSCATION
-SECRET_KEY = os.getenv("ENCRYPTION_KEY", "secure_fallback_key_2026")
+AVAILABLE_REACTIONS = NORMAL_EMOJIS + ["😱", "🤬", "😢", "💩", "🙏"]
 
-# AUDIT CHANNEL FOR TELEGRAM LOG EVENTS
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "-1003917762371"))
+DEFAULT_DELAY = 0.5
