@@ -1,15 +1,24 @@
 # config.py
+import os
+import logging
+from datetime import datetime, timedelta
 
-BOT_TOKEN = "8983484049:AAGstgl80-20c6pF0Pvgiz2FLA2YWpMQ3pM"
-API_ID = 34271171
-API_HASH = "434d1585320580b4070a2c7d6b2fafcd"
-OWNER_ID = [7952327997, 7636332528, 7489988262] 
+# Logging Setup
+logging.basicConfig(level=logging.ERROR)
+logging.getLogger('telethon').setLevel(logging.ERROR)
+logging.getLogger('httpx').setLevel(logging.ERROR)
 
-# MongoDB Configuration
-MONGO_URI =  "mongodb+srv://gopaljichoubey12:gopaljichoubey12@cluster0.qslas8u.mongodb.net/?appName=Cluster0"
-DB_NAME = "automation_bot"
+# Bot Configuration (Loaded from Environment Variables)
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+API_ID = int(os.getenv("API_ID", )
+API_HASH = os.getenv("API_HASH", "434d1585320580b4070a2c7d6b2fafcd")
+MONGO_URI = os.getenv("MONGO_URI", "")
 
-# ========== PREMIUM CUSTOM EMOJI IDs ==========
+# Owner Configuration
+OWNER_IDS = [7952327997, 7636332528, 7489988262]
+OWNER_ID = OWNER_IDS[0]  # Default primary owner ID
+
+# Premium Custom Emoji IDs
 PREMIUM_EMOJIS = {
     "heart_fire": "5042225965518816316",
     "lightning": "5042334757040423886",
@@ -26,7 +35,7 @@ PREMIUM_EMOJIS = {
     "devil": "5893079628469246474",
 }
 
-# Expanded positive reaction emojis for multi-select
+# Normal Positive Reaction Emojis
 NORMAL_EMOJIS = [
     "🔥", "❤️", "👍", "😍", "🎉", "💯", "👏", "🥳", "😁", "🤩",
     "😎", "🙌", "💪", "✨", "🌟", "💖", "💘", "💝", "💕", "💞",
@@ -35,5 +44,12 @@ NORMAL_EMOJIS = [
 ]
 
 AVAILABLE_REACTIONS = NORMAL_EMOJIS + ["😱", "🤬", "😢", "💩", "🙏"]
-
 DEFAULT_DELAY = 0.5
+
+# Helper functions for authorization checks
+def is_owner(user_id: int) -> bool:
+    return user_id in OWNER_IDS
+
+def styled_button(text, callback_data):
+    from telegram import InlineKeyboardButton
+    return InlineKeyboardButton(text, callback_data=callback_data)
